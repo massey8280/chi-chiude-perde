@@ -147,6 +147,11 @@ function handle(ws, msg) {
     broadcast(r, { t: 'state', v, state: r.state, by: ws.id }, ws);
     return;
   }
+  if (msg.t === 'react') {
+    // a quick reaction: forwarded to the others, never stored
+    if (Number.isInteger(msg.e) && msg.e >= 0 && msg.e < 12) broadcast(r, { t: 'react', id: ws.id, e: msg.e }, ws);
+    return;
+  }
   if (msg.t === 'bye') {
     // leaving the room for good (not just a dropped connection)
     const m = r.members.get(ws.id);

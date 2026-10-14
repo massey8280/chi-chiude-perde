@@ -248,9 +248,20 @@ h1 { margin: 0; font-family: var(--f-display); font-weight: 900; font-size: 1.12
 .invite { background: var(--sign); color: var(--sign-ink); border-radius: 12px; padding: 12px 14px; font-weight: 600; box-shadow: inset 0 0 0 3px var(--sign), inset 0 0 0 5px var(--sign-ink); }
 .invite b { font: 900 1.3rem/1 var(--f-display); letter-spacing: 0.1em; display: block; margin-top: 4px; }
 .linkbtn { background: none; border: 0; padding: 4px 0; color: var(--ink); font: 600 0.88rem var(--f-body); text-decoration: underline; cursor: pointer; align-self: flex-start; }
+.ex a.wl { font: 800 0.84rem/1 var(--f-display); letter-spacing: 0.03em; padding: 7px 8px 5px; border-radius: 6px; background: var(--tile); color: var(--tile-ink); box-shadow: inset 0 0 0 1px var(--tile-edge); text-decoration: none; }
+.ex a.wl:hover { box-shadow: inset 0 0 0 2px var(--sign); }
+a.wl { color: inherit; text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 2px; }
+.mean { align-self: flex-start; font: 600 0.88rem var(--f-body); color: var(--ink); text-decoration: underline; text-underline-offset: 2px; }
+.party { position: fixed; inset: 0; width: 100vw; height: 100vh; pointer-events: none; z-index: 40; }
+.reacts { display: flex; justify-content: center; gap: 6px; flex-wrap: wrap; }
+.reacts button { width: 44px; height: 44px; border-radius: 50%; border: 1px solid var(--line); background: var(--surface); font-size: 1.35rem; line-height: 1; cursor: pointer; padding: 0; }
+.reacts button:active { transform: scale(0.9); }
+.bubble { position: fixed; z-index: 35; pointer-events: none; display: flex; align-items: center; gap: 6px; padding: 6px 10px 6px 8px; border-radius: 999px; background: var(--surface); color: var(--ink); border: 2px solid var(--pc, var(--line)); box-shadow: 0 6px 20px var(--shadow); font: 700 0.85rem var(--f-body); animation: floatup 2.4s ease-out forwards; }
+.bubble .em { font-size: 1.6rem; line-height: 1; }
+@keyframes floatup { 0% { transform: translateY(8px) scale(0.6); opacity: 0; } 12% { transform: translateY(0) scale(1.08); opacity: 1; } 75% { opacity: 1; } 100% { transform: translateY(-46px) scale(1); opacity: 0; } }
 @media (max-height: 700px) { .sign { min-height: 66px; padding-block: 9px; } .status { min-height: 2.4em; } .app { gap: 8px; } }
 @media (prefers-reduced-motion: reduce) {
-  .board.shake, .tile.sel, .tile.hint, .word .l.in, .stamp, .plate, .card, .status .thinking::after { animation: none !important; }
+  .board.shake, .tile.sel, .tile.hint, .word .l.in, .stamp, .bubble, .plate, .card, .status .thinking::after { animation: none !important; }
   .sign, .board, .chip { transition: none; }
 }
 </style>
@@ -286,6 +297,7 @@ h1 { margin: 0; font-family: var(--f-display); font-weight: 900; font-size: 1.12
   </div>
 
   <div class="actions" id="actions"></div>
+  <div class="reacts" id="reacts" hidden></div>
 
   <div class="legend" id="legend">
     <span><b>Lettera vicina</b> all'ultima</span>
@@ -777,7 +789,7 @@ function syncNode() {
 }
 function snapshot() { const c = Object.assign({}, S, { undo: null }); return JSON.stringify(c); }
 function save() { if (S.online) return; store.set('ccp-game', S); store.set('ccp-settings', S.settings); }
-function afterChange() { if (S.online) { publish(); render(); return; } save(); render(); schedule(); }
+function afterChange() { if (S.online) { publish(); render(); schedule(); return; } save(); render(); schedule(); }
 
 // ---------------------------------------------------------------- moves
 function play(cell, byCpu) {
@@ -825,20 +837,22 @@ function challenge() {
   S.undo = null; HINT = null; flashMsg = '';
   S.proof = { challenger, defender, cells: [], tries: 0 };
   sound.challenge();
-  if (isCpu(defender)) { S.phase = 'cpuProve'; afterChange(); runCpuProof(); }
+  if (isCpu(defender)) { S.phase = 'cpuProve'; afterChange(); }
   else { S.phase = 'prove'; afterChange(); }
 }
+let cpuProofRunning = false;
 function runCpuProof() {
   clearTimeout(animTimer);
+  cpuProofRunning = true;
   const pr = S.proof;
   pr.cells = [];
-  if (!NODE) { animTimer = setTimeout(() => finishBluff(pr.defender, pr.challenger), 1300); return; }
+  if (!NODE) { animTimer = setTimeout(() => { cpuProofRunning = false; if (S.phase === 'cpuProve') finishBluff(pr.defender, pr.challenger); }, 1300); return; }
   const bw = bestWord(NODE);
   let i = 0;
   const step = () => {
-    if (S.phase !== 'cpuProve') return;
-    if (i < bw.cells.length) { pr.cells.push(bw.cells[i++]); sound.tap(); render(); animTimer = setTimeout(step, 430); }
-    else animTimer = setTimeout(() => finishProved(pr.challenger, pr.defender, bw.s), 500);
+    if (S.phase !== 'cpuProve') { cpuProofRunning = false; return; }
+    if (i < bw.cells.length) { S.proof.cells.push(bw.cells[i++]); sound.tap(); if (S.online) afterChange(); else render(); animTimer = setTimeout(step, 430); }
+    else animTimer = setTimeout(() => { cpuProofRunning = false; if (S.phase === 'cpuProve') finishProved(S.proof.challenger, S.proof.defender, bw.s); }, 500);
   };
   animTimer = setTimeout(step, 900);
 }
@@ -914,13 +928,19 @@ function endRound(loser, info) {
     winners = others.filter(x => x.v === min).map(x => x.i);
   }
   S.over = Object.assign(info, { loser, done, winners, letter: STOPW[S.pen[loser] - 1] });
-  S.phase = 'over'; S.undo = null; HINT = null; flashMsg = '';
+  S.phase = 'over'; S.undo = null; HINT = null; flashMsg = ''; cpuProofRunning = false;
+  if (done) {
+    S.tally = S.tally || {};
+    for (const w of winners) { const k = tallyKey(w); S.tally[k] = (S.tally[k] || 0) + 1; }
+    if (winners.some(i => isMe(i)) || (!S.online && humans() > 1)) celebrate();
+  }
   if (done) recordStats();
   const youIdx = S.settings.players.findIndex((p, i) => isMe(i));
   if (youIdx >= 0) setTimeout(() => (loser === youIdx ? sound.lose() : sound.win()), 380);
   sheetMin = false;
   afterChange();
 }
+function tallyKey(i) { const p = S.settings.players[i]; return S.online || p.type === 'cpu' ? p.id || ('cpu' + i) : 'n:' + p.name; }
 function nextRound(sameGrid) {
   if (S.over && S.over.done) { S.pen = S.pen.map(() => 0); S.hints = S.hints.map(() => MAX_HINTS); }
   S.starter = (S.starter + 1) % N();
@@ -946,8 +966,10 @@ function recordStats() {
 // ---------------------------------------------------------------- computer
 function schedule() {
   clearTimeout(cpuTimer);
-  if (S.online) return;
-  if (S.phase !== 'play' || !isCpu(S.turn)) return;
+  // online, one phone (the first player who is connected) plays for the computer
+  if (S.online && !(typeof isHost === 'function' && isHost())) return;
+  if (S.phase === 'cpuProve') { if (!cpuProofRunning) runCpuProof(); return; }
+  if (S.phase !== 'play' || !S.settings.players.length || !isCpu(S.turn)) return;
   const turn = S.turn, at = S.path.length;
   cpuTimer = setTimeout(() => {
     if (S.phase !== 'play' || S.turn !== turn || S.path.length !== at) return;
@@ -1020,8 +1042,8 @@ function renderPlayers() {
   $('players').innerHTML = S.settings.players.map((p, i) => {
     const turn = (S.phase === 'play' && S.turn === i) || (S.phase === 'prove' && S.proof.defender === i);
     const stop = [...STOPW].map((ch, j) => `<span class="oct${j < S.pen[i] ? ' on' : ''}">${ch}</span>`).join('');
-    const off = S.online && !memberOnline(p.id), me = S.online && isMe(i);
-    return `<div class="chip${turn ? ' turn' : ''}${off ? ' off' : ''}" style="${pc(i)}"><span class="dot"></span><span class="nm">${esc(p.name)}</span>${me ? '<span class="me">tu</span>' : ''}<span class="stop" aria-label="${S.pen[i]} lettere di STOP">${stop}</span></div>`;
+    const off = S.online && p.type !== 'cpu' && !memberOnline(p.id), me = S.online && isMe(i);
+    return `<div class="chip${turn ? ' turn' : ''}${off ? ' off' : ''}" data-seat="${i}" style="${pc(i)}"><span class="dot"></span><span class="nm">${esc(p.name)}</span>${me ? '<span class="me">tu</span>' : ''}<span class="stop" aria-label="${S.pen[i]} lettere di STOP">${stop}</span></div>`;
   }).join('');
 }
 // Only newly added letters animate; anything else redraws quietly.
@@ -1172,19 +1194,24 @@ function renderActions() {
     html += `<button class="btn big" type="button" id="aGive">Mi arrendo</button>`;
     html += `<button class="btn primary big" type="button" id="aOk"${S.proof.cells.length ? '' : ' disabled'}>Conferma</button>`;
   }
+  const stuck = typeof stuckAction === 'function' ? stuckAction() : null;
+  if (stuck) html += `<button class="btn plate big" type="button" id="aStuck">${esc(stuck.label)}</button>`;
   if (a.dataset.h !== html) {
     a.innerHTML = html; a.dataset.h = html;
     const on = (id, fn) => { const el = $(id); if (el) el.onclick = fn; };
     on('aChal', challenge); on('aHint', useHint); on('aUndo', undo); on('aGive', proofGiveUp); on('aOk', proofConfirm);
+    if (stuck) on('aStuck', () => { const s2 = stuckAction(); if (s2) s2.run(); });
   }
 }
 let sheetMin = false;
-function chips(list) { return list.length ? `<div class="ex">${list.map(w => `<span>${fmt(w)}</span>`).join('')}</div>` : ''; }
+const meaningURL = w => 'https://it.wiktionary.org/wiki/' + encodeURIComponent(fmt(w).toLowerCase());
+function wordLink(w) { return `<a class="wl" href="${meaningURL(w)}" target="_blank" rel="noopener" title="Cosa vuol dire ${fmt(w)}?">${fmt(w)}</a>`; }
+function chips(list) { return list.length ? `<div class="ex">${list.map(w => wordLink(w)).join('')}</div>` : ''; }
 function renderResult() {
   const r = $('result'), card = $('resultCard'), o = S.over;
   r.hidden = !o;
   if (!o) { card.innerHTML = ''; card.dataset.k = ''; return; }
-  const key = JSON.stringify([o, sheetMin, S.pen]);
+  const key = JSON.stringify([o, sheetMin, S.pen, S.tally || null]);
   if (card.dataset.k === key) return;
   card.dataset.k = key;
   card.classList.toggle('min', sheetMin);
@@ -1208,16 +1235,16 @@ function renderResult() {
   } else if (o.kind === 'bluff') {
     title = o.existed ? 'Parola non trovata' : 'Bluff scoperto!';
     if (o.existed) {
-      body = say(L, `Non hai mostrato una parola. Peccato: c'era <b>${fmt(o.existed)}</b>.`, `{n} non ha mostrato una parola. Eppure c'era <b>${fmt(o.existed)}</b>.`);
+      body = say(L, `Non hai mostrato una parola. Peccato: c'era <b>${wordLink(o.existed)}</b>.`, `{n} non ha mostrato una parola. Eppure c'era <b>${wordLink(o.existed)}</b>.`);
     } else {
       body = `Da <b>${fmt(o.prefix)}</b> non nasce nessuna parola. `;
       if (o.deadOwner >= 0 && o.deadOwner !== L) body += say(L, `Il bluff l'aveva cominciato ${bname(o.deadOwner)} con la <b>${o.deadLetter}</b>, ma tu l'hai continuato invece di sfidare.`, `Il bluff l'aveva cominciato ${bname(o.deadOwner)} con la <b>${o.deadLetter}</b>, ma {n} l'ha continuato invece di sfidare.`);
-      else body += say(L, `La <b>${o.deadLetter || letterAt(S.path[S.path.length - 1])}</b> era un bluff, e ${bname(o.challenger)} se n'è accorto.`, `La <b>${o.deadLetter || letterAt(S.path[S.path.length - 1])}</b> di {n} era un bluff, e ${soloYou(o.challenger) ? 'te ne sei accorto' : bname(o.challenger) + " se n'è accorto"}.`);
+      else body += say(L, `La <b>${o.deadLetter || letterAt(S.path[S.path.length - 1])}</b> era un bluff, e ${bname(o.challenger)} se n'è accorto.`, `La <b>${o.deadLetter || letterAt(S.path[S.path.length - 1])}</b> di {n} era un bluff, e ${isMe(o.challenger) ? 'te ne sei accorto' : bname(o.challenger) + " se n'è accorto"}.`);
     }
     exLabel = o.existed ? `Da ${fmt(o.prefix)} si poteva arrivare anche a` : o.beforePrefix ? `Prima del bluff, da ${fmt(o.beforePrefix)} si poteva arrivare a` : '';
   } else {
     title = 'Sfida persa!';
-    body = say(o.defender, `Avevi davvero una parola: <b>${fmt(o.word)}</b>.`, `{n} aveva davvero una parola: <b>${fmt(o.word)}</b>.`) + ' ' +
+    body = say(o.defender, `Avevi davvero una parola: <b>${wordLink(o.word)}</b>.`, `{n} aveva davvero una parola: <b>${wordLink(o.word)}</b>.`) + ' ' +
       say(L, 'La sfida costa cara a te.', 'La sfida costa cara a {n}.');
     exLabel = `Da ${fmt(o.prefix)} c'erano anche`;
   }
@@ -1229,16 +1256,51 @@ function renderResult() {
     end = `<p><b>${say(L, 'Hai fatto STOP.', '{n} ha fatto STOP.')} ${youWon && ws.length === 1 ? 'Hai vinto la partita!' : (ws.length > 1 ? 'Vincono ' + ws.join(' e ') : 'Vince ' + ws[0]) + '!'}</b></p>`;
     const key = statsKey();
     if (key) { const st = store.get('ccp-stats', {})[key]; if (st) end += `<p class="small">Contro il computer (${key}): ${st.w} vinte, ${st.l} perse.</p>`; }
+    else if (S.tally) {
+      const rows = S.settings.players.map((p, i) => ({ n: isMe(i) ? 'tu' : esc(p.name), v: S.tally[tallyKey(i)] || 0 })).sort((a, b) => b.v - a.v);
+      end += `<p class="small">Partite vinte qui: ${rows.map(r => `${r.n} <b>${r.v}</b>`).join(' · ')}</p>`;
+    }
   }
+  const meaning = o.word && (o.kind === 'closed' || o.kind === 'proved') ? `<a class="mean" href="${meaningURL(o.word)}" target="_blank" rel="noopener">Cosa vuol dire ${fmt(o.word)}?</a>` : '';
   card.innerHTML = `<div class="eyebrow"><span>${o.done ? 'Fine partita' : 'Fine del round'}</span><button class="mini" type="button" id="rMin">${sheetMin ? 'Mostra' : 'Guarda la griglia'}</button></div>
-    <h2>${title}</h2><p>${body}</p><p>${pen}</p>${end}
+    <h2>${title}</h2>${meaning}<p>${body}</p><p>${pen}</p>${end}
     ${note ? `<div class="note">${note}</div>` : ''}
-    ${o.examples && o.examples.length && exLabel ? `<div class="eyebrow">${exLabel}</div>${chips(o.examples)}` : ''}
+    ${o.examples && o.examples.length && exLabel ? `<div class="eyebrow">${exLabel}</div>${chips(o.examples)}<p class="small">Tocca una parola per vedere cosa vuol dire.</p>` : ''}
+    ${S.online && typeof reactButtonsHTML === 'function' ? reactButtonsHTML() : ''}
     <div class="row"><button class="btn primary big" type="button" id="rNext">${o.done ? 'Nuova partita' : 'Prossimo round'}</button>
     <button class="btn big" type="button" id="rSame">Rigioca la griglia</button></div>`;
+  card.querySelectorAll('[data-r]').forEach(b => { b.onclick = () => sendReact(+b.dataset.r); });
   $('rMin').onclick = () => { sheetMin = !sheetMin; renderResult(); };
   $('rNext').onclick = () => nextRound(false);
   $('rSame').onclick = () => nextRound(true);
+}
+
+// ---------------------------------------------------------------- party
+function celebrate() {
+  try {
+    if (matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    const cv = document.createElement('canvas');
+    cv.className = 'party'; cv.setAttribute('aria-hidden', 'true');
+    document.body.appendChild(cv);
+    const dpr = Math.min(2, window.devicePixelRatio || 1), W = innerWidth, H = innerHeight;
+    cv.width = W * dpr; cv.height = H * dpr;
+    const g = cv.getContext('2d'); g.scale(dpr, dpr);
+    const cs = getComputedStyle(document.documentElement);
+    const cols = ['--p0', '--p1', '--p2', '--p3', '--plate', '--sign', '--stop'].map(v => cs.getPropertyValue(v).trim() || '#888');
+    const bits = Array.from({ length: 140 }, () => ({ x: W / 2 + (Math.random() - 0.5) * W * 0.3, y: H * 0.35, vx: (Math.random() - 0.5) * 9, vy: -Math.random() * 11 - 4,
+      r: Math.random() * Math.PI, vr: (Math.random() - 0.5) * 0.3, w: 6 + Math.random() * 6, h: 3 + Math.random() * 4, c: cols[Math.floor(Math.random() * cols.length)] }));
+    const t0 = performance.now();
+    const frame = t => {
+      const el = t - t0;
+      g.clearRect(0, 0, W, H);
+      for (const b of bits) {
+        b.vy += 0.32; b.vx *= 0.99; b.x += b.vx; b.y += b.vy; b.r += b.vr;
+        g.save(); g.translate(b.x, b.y); g.rotate(b.r); g.globalAlpha = Math.max(0, 1 - el / 2600); g.fillStyle = b.c; g.fillRect(-b.w / 2, -b.h / 2, b.w, b.h); g.restore();
+      }
+      if (el < 2600) requestAnimationFrame(frame); else cv.remove();
+    };
+    requestAnimationFrame(frame);
+  } catch (e) {}
 }
 
 // ---------------------------------------------------------------- setup
@@ -3689,36 +3751,44 @@ function sanitizeState(st) {
     if (!st || typeof st !== 'object' || st.v !== 3 || !st.settings) return null;
     const se = st.settings, size = se.size, n = size * size;
     if (![4, 5].includes(size) || ![3, 4, 5].includes(se.minLen) || !Array.isArray(se.players) || se.players.length > 6) return null;
-    const players = se.players.map(p => ({ id: String((p && p.id) || ''), name: cleanStr(p && p.name, 14) || 'Giocatore', type: 'human' }));
-    if (players.some(p => !/^[A-Za-z0-9_-]{4,40}$/.test(p.id))) return null;
+    const players = se.players.map(p => ({ id: String((p && p.id) || ''), name: cleanStr(p && p.name, 14) || 'Giocatore', type: p && p.type === 'cpu' ? 'cpu' : 'human' }));
+    if (players.some(p => (p.type === 'cpu' ? !/^cpu[1-3]$/.test(p.id) : !/^[A-Za-z0-9_-]{4,40}$/.test(p.id)))) return null;
     const np = players.length, top = Math.max(0, np - 1);
     const int = (x, lo, hi) => Number.isInteger(x) && x >= lo && x <= hi;
     if (!Array.isArray(st.grid) || st.grid.length !== n || !st.grid.every(c => int(c, 0, ALPHA.length - 1))) return null;
     const path = Array.isArray(st.path) ? st.path : [], owners = Array.isArray(st.owners) ? st.owners : [];
     if (path.length !== owners.length || !path.every(c => int(c, 0, n - 1)) || new Set(path).size !== path.length || !owners.every(o => int(o, 0, top))) return null;
-    if (!['lobby', 'play', 'prove', 'over'].includes(st.phase)) return null;
+    if (!['lobby', 'play', 'prove', 'cpuProve', 'over'].includes(st.phase)) return null;
     if (st.phase !== 'lobby' && np < 2) return null;
     const arr = (a, hi) => (Array.isArray(a) && a.length === np && a.every(x => int(x, 0, hi)) ? a.slice() : players.map(() => 0));
     const lob = st.lobby || {};
     const out = {
       v: 3, online: true, room: String(st.room || ''), rev: Number.isInteger(st.rev) ? st.rev : 0,
-      lobby: { size: [4, 5].includes(lob.size) ? lob.size : 4, minLen: [3, 4, 5].includes(lob.minLen) ? lob.minLen : 4 },
-      settings: { players, level: 'normale', minLen: se.minLen, size },
+      lobby: { size: [4, 5].includes(lob.size) ? lob.size : 4, minLen: [3, 4, 5].includes(lob.minLen) ? lob.minLen : 4,
+        cpus: int(lob.cpus, 0, 2) ? lob.cpus : 0, level: LEVELS[lob.level] ? lob.level : 'normale' },
+      settings: { players, level: LEVELS[se.level] ? se.level : 'normale', minLen: se.minLen, size },
+      tally: cleanTally(st.tally),
       pen: arr(st.pen, 4), hints: arr(st.hints, MAX_HINTS),
       starter: int(st.starter, 0, top) ? st.starter : 0, turn: int(st.turn, 0, top) ? st.turn : 0,
       grid: st.grid.slice(), path: path.slice(), owners: owners.slice(), phase: st.phase,
       proof: null, over: null, deadAt: -1, undo: st.undo && st.phase === 'play' && path.length ? 'm' : null,
     };
     if (!/^[A-Z0-9]{4,8}$/.test(out.room)) return null;
-    if (st.proof && (st.phase === 'prove' || st.phase === 'over')) {
+    if (st.proof && (st.phase === 'prove' || st.phase === 'cpuProve' || st.phase === 'over')) {
       const pr = st.proof, cells = Array.isArray(pr.cells) ? pr.cells : [];
       if (int(pr.challenger, 0, top) && int(pr.defender, 0, top) && cells.every(c => int(c, 0, n - 1)) && cells.length <= n)
         out.proof = { challenger: pr.challenger, defender: pr.defender, cells: cells.slice(), tries: int(pr.tries, 0, 999) ? pr.tries : 0 };
     }
-    if (st.phase === 'prove' && !out.proof) return null;
+    if ((st.phase === 'prove' || st.phase === 'cpuProve') && !out.proof) return null;
     if (st.phase === 'over') { out.over = cleanOver(st.over, np); if (!out.over) return null; }
     return out;
   } catch (e) { return null; }
+}
+function cleanTally(t) {
+  const out = {};
+  if (!t || typeof t !== 'object') return out;
+  for (const [k, v] of Object.entries(t).slice(0, 40)) if (/^[A-Za-z0-9_-]{4,40}$/.test(k) && Number.isInteger(v) && v >= 0 && v < 10000) out[k] = v;
+  return out;
 }
 function cleanOver(o, np) {
   if (!o || typeof o !== 'object') return null;
@@ -3766,19 +3836,105 @@ function adoptRemote(raw, quiet) {
       if (S.over.kind === 'closed') sound.close();
       const me = mySeat();
       if (me >= 0) setTimeout(() => (S.over.loser === me ? sound.lose() : sound.win()), 380);
+      if (S.over.done && me >= 0 && S.over.winners.includes(me)) celebrate();
       sheetMin = false;
     }
+    if ((S.phase === 'cpuProve' && old.phase === 'play')) sound.challenge();
   }
   const myTurnNow = S.phase === 'play' && S.settings.players.length > 0 && canAct(S.turn);
   if (myTurnNow && !wasMyTurn && !quiet) { try { navigator.vibrate && navigator.vibrate(35); } catch (e) {} }
   document.title = myTurnNow && document.hidden ? 'Tocca a te! · Chi chiude perde' : 'Chi chiude perde';
   store.set('ccp-room', { code: S.room, at: Date.now(), b: NET.broker || 0, j: NET.joinedAt });
   render();
+  schedule();
   return true;
+}
+
+// The phone that plays for the computer: the first connected human player, by order of arrival.
+function isHost() {
+  if (!S || !S.online || !NET.connected || !S.settings.players.some(p => p.type === 'cpu')) return false;
+  const seated = new Set(S.settings.players.filter(p => p.type === 'human').map(p => p.id));
+  const c = NET.members.filter(m => m.online && seated.has(m.id)).sort((a, b) => (a.j || 0) - (b.j || 0) || (a.id < b.id ? -1 : 1));
+  return !!c.length && c[0].id === NET.id;
+}
+
+// Someone left mid-game: after a short wait the others can move on without them.
+const offSince = {};
+function offlineFor(id) {
+  if (memberOnline(id)) { delete offSince[id]; return 0; }
+  if (!offSince[id]) offSince[id] = Date.now();
+  return Date.now() - offSince[id];
+}
+function stuckAction() {
+  if (!S || !S.online || !NET.connected || mySeat() < 0) return null;
+  const P = S.settings.players;
+  if (S.phase === 'play') {
+    const p = P[S.turn];
+    if (!p || p.type === 'cpu' || p.id === NET.id || offlineFor(p.id) < 15000) return null;
+    return { label: `Salta il turno di ${p.name}`, run: () => {
+      if (S.phase !== 'play' || S.settings.players[S.turn].id !== p.id) return;
+      S.turn = (S.turn + 1) % N(); S.undo = null; HINT = null; flashMsg = `${p.name} è offline: turno saltato.`; afterChange();
+    } };
+  }
+  if (S.phase === 'prove') {
+    const d = P[S.proof.defender];
+    if (!d || d.type === 'cpu' || d.id === NET.id || offlineFor(d.id) < 15000) return null;
+    return { label: `${d.name} non risponde: conta come arreso`, run: () => { if (S.phase === 'prove') proofGiveUp(); } };
+  }
+  return null;
+}
+setInterval(() => { if (S && S.online && (S.phase === 'play' || S.phase === 'prove')) renderActions(); }, 4000);
+
+// ---------------------------------------------------------------- quick reactions
+const REACTS = ['👏', '😂', '😱', '🤔', '😈', '🙏'];
+let lastReact = 0;
+const seenReacts = new Set();
+function renderReacts() {
+  const box = $('reacts');
+  if (!box) return;
+  const show = !!(S && S.online && NET.connected && S.phase !== 'lobby');
+  box.hidden = !show;
+  if (!show || box.childElementCount) return;
+  box.innerHTML = REACTS.map((e, i) => `<button type="button" data-r="${i}" aria-label="Manda ${e}">${e}</button>`).join('');
+  box.querySelectorAll('button').forEach(b => { b.onclick = () => sendReact(+b.dataset.r); });
+}
+function reactButtonsHTML() {
+  return `<div class="reacts">${REACTS.map((e, i) => `<button type="button" data-r="${i}" aria-label="Manda ${e}">${e}</button>`).join('')}</div>`;
+}
+function sendReact(i) {
+  if (Date.now() - lastReact < 900 || !REACTS[i]) return;
+  lastReact = Date.now();
+  const k = Math.random().toString(36).slice(2, 10);
+  seenReacts.add(k);
+  showReact(NET.id, i);
+  if (typeof netReact === 'function') netReact(i, k);
+}
+function gotReact(id, i, k) {
+  if (typeof k === 'string') { if (seenReacts.has(k)) return; seenReacts.add(k); if (seenReacts.size > 200) seenReacts.clear(); }
+  if (id === NET.id || !Number.isInteger(i) || !REACTS[i]) return;
+  showReact(id, i);
+}
+function showReact(id, i) {
+  const seat = S && S.settings ? S.settings.players.findIndex(p => p.id === id) : -1;
+  const m = NET.members.find(x => x.id === id);
+  const name = id === NET.id ? 'tu' : seat >= 0 ? S.settings.players[seat].name : m ? m.name : '';
+  const chip = seat >= 0 ? document.querySelector(`.chip[data-seat="${seat}"]`) : null;
+  const r = chip ? chip.getBoundingClientRect() : $('board').getBoundingClientRect();
+  const b = document.createElement('div');
+  b.className = 'bubble';
+  if (seat >= 0) b.style.setProperty('--pc', `var(--p${seat})`);
+  b.innerHTML = `<span class="em">${REACTS[i]}</span><span></span>`;
+  b.lastChild.textContent = name;
+  b.style.left = Math.max(8, Math.min(innerWidth - 140, r.left + 4)) + 'px';
+  b.style.top = Math.max(8, (chip ? r.bottom + 4 : r.top + 10)) + 'px';
+  document.body.appendChild(b);
+  setTimeout(() => b.remove(), 2500);
+  if (id !== NET.id) sound.tone(880, 0.06, 'sine', 0.035);
 }
 
 function renderNet() {
   if (typeof refreshMembers === 'function' && NET.room) refreshMembers();
+  renderReacts();
   const el = $('net');
   if (!el) return;
   const on = !!(S && S.online);
@@ -3816,18 +3972,22 @@ function renderLobby() {
   const inLobby = S.phase === 'lobby';
   const link = roomLink(S.room);
   const online = NET.members.filter(m => m.online);
-  const key = JSON.stringify([S.room, S.phase, S.lobby, NET.members, NET.connected, link]);
+  const key = JSON.stringify([S.room, S.phase, S.lobby, NET.members, NET.connected, link, S.tally || null]);
   if (box.dataset.k === key) return;
   box.dataset.k = key;
   const seatOf = id => (S.settings.players || []).findIndex(p => p.id === id);
   const list = NET.members.map(m => {
     const seat = seatOf(m.id);
     const dot = seat >= 0 && !inLobby ? `style="--pc:var(--p${seat})"` : `style="--pc:${m.online ? 'var(--sign)' : 'var(--line)'}"`;
-    const st = m.online ? (inLobby || seat >= 0 ? '' : 'guarda') : 'offline';
+    const wins = S.tally && S.tally[m.id] ? `${S.tally[m.id]} ${S.tally[m.id] === 1 ? 'vittoria' : 'vittorie'}` : '';
+    const st = m.online ? (inLobby || seat >= 0 ? wins : 'guarda') : 'offline';
     return `<li class="${m.online ? '' : 'off'}"><span class="dot" ${dot}></span><span class="nm">${esc(m.name)}</span>${m.id === NET.id ? '<span class="me">tu</span>' : ''}<span class="st">${st}</span></li>`;
   }).join('');
-  const lob = S.lobby || { size: 4, minLen: 4 };
-  const enough = online.length >= 2;
+  const lob = S.lobby || { size: 4, minLen: 4, cpus: 0, level: 'normale' };
+  const cpus = lob.cpus || 0;
+  const enough = online.length + cpus >= 2 && online.length >= 1;
+  const total = Math.min(6, online.length + cpus);
+  const cpuRows = inLobby ? Array.from({ length: cpus }, (_, k) => `<li><span class="dot" style="--pc:var(--muted)"></span><span class="nm">Computer${cpus > 1 ? ' ' + (k + 1) : ''}</span><span class="st">${S.tally && S.tally['cpu' + (k + 1)] ? S.tally['cpu' + (k + 1)] + ' vittorie' : ''}</span></li>`).join('') : '';
   $('lobbyCard').innerHTML = `
     <div class="eyebrow"><span>Stanza</span><button class="mini" type="button" id="lExit">Esci dalla stanza</button></div>
     <div class="code" aria-label="Codice stanza">${esc(S.room)}</div>
@@ -3836,7 +3996,7 @@ function renderLobby() {
     <div class="row"><button class="btn primary big" type="button" id="lShare">Invia il link</button><button class="btn big" type="button" id="lCopy">Copia link</button></div>
     <input class="linkbox" id="lLink" type="text" readonly value="${esc(link)}" aria-label="Link della stanza">
     <div class="lab">Nella stanza (${online.length})</div>
-    <ul class="members">${list || '<li>Solo tu, per ora.</li>'}</ul>
+    <ul class="members">${list || '<li>Solo tu, per ora.</li>'}${cpuRows}</ul>
     ${online.length < 2 ? '<p class="small">Gli altri compaiono qui appena aprono il link. Se resti solo a lungo, controlla che il codice sia lo stesso.</p>' : ''}
     ${typeof netDiag === 'function' && netDiag() ? `<p class="small">${netDiag()}</p>` : ''}
     ${inLobby ? `
@@ -3847,7 +4007,15 @@ function renderLobby() {
       <label><input type="radio" name="lmin" id="lm3" value="3"${lob.minLen === 3 ? ' checked' : ''}><span>3 lettere</span></label>
       <label><input type="radio" name="lmin" id="lm4" value="4"${lob.minLen === 4 ? ' checked' : ''}><span>4 lettere</span></label>
       <label><input type="radio" name="lmin" id="lm5" value="5"${lob.minLen === 5 ? ' checked' : ''}><span>5 lettere</span></label></div></div>
-    <button class="btn primary big" type="button" id="lStart"${enough && NET.connected ? '' : ' disabled'}>${enough ? `Inizia la partita (${Math.min(online.length, 6)} giocatori)` : 'Aspettiamo almeno un altro telefono'}</button>`
+    <div class="field"><div class="lab">Computer al tavolo</div><div class="seg">
+      <label><input type="radio" name="lcpu" id="lc0" value="0"${cpus === 0 ? ' checked' : ''}><span>Nessuno</span></label>
+      <label><input type="radio" name="lcpu" id="lc1" value="1"${cpus === 1 ? ' checked' : ''}><span>Uno</span></label>
+      <label><input type="radio" name="lcpu" id="lc2" value="2"${cpus === 2 ? ' checked' : ''}><span>Due</span></label></div>
+      ${cpus ? `<div class="seg">
+      <label><input type="radio" name="llev" id="lvf" value="facile"${lob.level === 'facile' ? ' checked' : ''}><span>Facile</span></label>
+      <label><input type="radio" name="llev" id="lvn" value="normale"${lob.level !== 'facile' && lob.level !== 'esperto' ? ' checked' : ''}><span>Normale</span></label>
+      <label><input type="radio" name="llev" id="lve" value="esperto"${lob.level === 'esperto' ? ' checked' : ''}><span>Esperto</span></label></div>` : ''}</div>
+    <button class="btn primary big" type="button" id="lStart"${enough && NET.connected ? '' : ' disabled'}>${enough ? `Inizia la partita (${total} giocatori)` : 'Aspettiamo almeno un altro telefono, o aggiungi il computer'}</button>`
     : `<div class="row"><button class="btn primary big" type="button" id="lBack">Torna al gioco</button><button class="btn big" type="button" id="lRestart"${enough && NET.connected ? '' : ' disabled'}>Nuova partita con chi c'è</button></div>`}
   `;
   const on = (id, fn) => { const el = $(id); if (el) el.onclick = fn; };
@@ -3857,10 +4025,10 @@ function renderLobby() {
   on('lStart', () => startOnlineGame());
   on('lBack', () => closeLobby());
   on('lRestart', () => { S.phase = 'lobby'; S.over = null; S.proof = null; lobbyOpen = false; afterChange(); });
-  box.querySelectorAll('input[name=lsize],input[name=lmin]').forEach(inp => {
+  box.querySelectorAll('input[name=lsize],input[name=lmin],input[name=lcpu],input[name=llev]').forEach(inp => {
     inp.onchange = () => {
-      const size = +(box.querySelector('input[name=lsize]:checked')?.value || 4), minLen = +(box.querySelector('input[name=lmin]:checked')?.value || 4);
-      S.lobby = { size, minLen };
+      const val = (n, d) => box.querySelector(`input[name=${n}]:checked`)?.value || d;
+      S.lobby = { size: +val('lsize', 4), minLen: +val('lmin', 4), cpus: +val('lcpu', 0), level: val('llev', (S.lobby && S.lobby.level) || 'normale') };
       afterChange();
     };
   });
@@ -3876,13 +4044,16 @@ async function copyLink(link) {
   catch (e) { const el = $('lLink'); if (el) { el.focus(); el.select(); } flash('Seleziona il link e copialo.'); }
 }
 function startOnlineGame() {
-  const online = NET.members.filter(m => m.online).slice(0, 6);
-  if (online.length < 2) return;
-  const lob = S.lobby || { size: 4, minLen: 4 };
-  const room = S.room, starter = S.starter || 0;
-  newGame({ players: online.map(m => ({ name: m.name, type: 'human', id: m.id })), level: 'normale', size: lob.size, minLen: lob.minLen });
-  S.online = true; S.room = room; S.lobby = lob;
-  S.starter = starter % online.length; S.turn = S.starter;
+  const lob = S.lobby || { size: 4, minLen: 4, cpus: 0, level: 'normale' };
+  const cpus = lob.cpus || 0;
+  const online = NET.members.filter(m => m.online).slice(0, 6 - cpus);
+  if (!online.length || online.length + cpus < 2) return;
+  const room = S.room, starter = S.starter || 0, tally = S.tally || {};
+  const players = online.map(m => ({ name: m.name, type: 'human', id: m.id }));
+  for (let k = 1; k <= cpus; k++) players.push({ name: cpus > 1 ? `Computer ${k}` : 'Computer', type: 'cpu', id: 'cpu' + k });
+  newGame({ players, level: lob.level || 'normale', size: lob.size, minLen: lob.minLen });
+  S.online = true; S.room = room; S.lobby = lob; S.tally = tally;
+  S.starter = starter % players.length; S.turn = S.starter;
   lobbyOpen = false;
   afterChange();
 }
@@ -3985,6 +4156,7 @@ window.addEventListener('hashchange', () => {
 });
 function startSite() {
   initHome();
+  try { if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost')) navigator.serviceWorker.register('sw.js').catch(() => {}); } catch (e) {}
   const h = parseHash();
   const saved = store.get('ccp-room', null);
   if (h.code) {
@@ -4045,7 +4217,7 @@ function mqOpen(b, gen) {
     if (gen !== GEN) return;
     entry.up = true; NET.connected = true;
     if (!NET.firstUpAt) NET.firstUpAt = Date.now();
-    c.subscribe([topic(room, 's'), topic(room, 'm/+'), topic(room, 'q')], { qos: 1 }, err => {
+    c.subscribe([topic(room, 's'), topic(room, 'm/+'), topic(room, 'q'), topic(room, 'r')], { qos: 1 }, err => {
       if (err || gen !== GEN) return;
       c.publish(meT, presenceLine(1), { qos: 0, retain: true });
       c.publish(topic(room, 'q'), JSON.stringify({ id: NET.id }), { qos: 0 });
@@ -4085,6 +4257,7 @@ function onMq(gen, tp, buf) {
   let m = null;
   if (txt) { if (txt.length > 200000) return; try { m = JSON.parse(txt); } catch (e) { return; } }
   if (rest === 'q') { if (NET.decided && m && m.id !== NET.id) resendSoon(); return; }
+  if (rest === 'r') { if (m && typeof m.id === 'string') gotReact(m.id, m.e, m.k); return; }
   if (rest.startsWith('m/')) {
     const id = rest.slice(2);
     if (!/^[A-Za-z0-9_-]{4,40}$/.test(id)) return;
@@ -4149,6 +4322,10 @@ function netLeave() {
     try { if (x.up && room) x.c.publish(topic(room, 'm/' + NET.id), '', { qos: 0, retain: true }); } catch (e) {}
     setTimeout(() => { try { x.c.end(true); } catch (e) {} }, 400);
   }
+}
+function netReact(e, k) {
+  const msg = JSON.stringify({ id: NET.id, e, k });
+  for (const x of MQS) if (x.up) x.c.publish(topic(NET.room, 'r'), msg, { qos: 0 });
 }
 function netWake() { for (const x of MQS) if (x.c && !x.up) { try { x.c.reconnect(); } catch (e) {} } }
 function netDiag() {

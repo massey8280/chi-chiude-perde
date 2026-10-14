@@ -17,6 +17,14 @@ Il gioco di parole che si fa in macchina, su una griglia di lettere come Ruzzle.
 Uno crea la stanza e manda il link (o fa inquadrare il QR). Chi lo apre scrive il nome ed è dentro:
 niente account, niente app. Si può anche giocare da soli contro il computer o passandosi il telefono.
 
+- Nella stanza si può aggiungere **il computer** (uno o due, facile/normale/esperto): lo fa giocare il
+  telefono del primo giocatore collegato.
+- **Reazioni** veloci (👏 😂 😱 🤔 😈 🙏) che compaiono sugli altri telefoni.
+- Se qualcuno esce a metà, dopo pochi secondi gli altri possono **saltargli il turno**.
+- La stanza tiene il conto delle **partite vinte** da ognuno.
+- A fine round ogni parola porta al suo **significato** sul Wikizionario.
+- Il sito resta sul telefono: **senza rete** si apre lo stesso e si gioca su un solo telefono.
+
 ## Come è fatto
 
 - `index.html` — tutto il gioco in un file: griglia, dizionario italiano (~50.000 parole con plurali,
