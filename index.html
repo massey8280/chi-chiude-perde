@@ -244,6 +244,10 @@ h1 { margin: 0; font-family: var(--f-display); font-weight: 900; font-size: 1.12
 .or { display: flex; align-items: center; gap: 10px; color: var(--muted); font-size: 0.85rem; }
 .or::before, .or::after { content: ''; flex: 1; height: 1px; background: var(--line); }
 .err { color: var(--stop); font-weight: 600; min-height: 1.2em; margin: 0; }
+.err.info { color: var(--muted); font-weight: 500; }
+.invite { background: var(--sign); color: var(--sign-ink); border-radius: 12px; padding: 12px 14px; font-weight: 600; box-shadow: inset 0 0 0 3px var(--sign), inset 0 0 0 5px var(--sign-ink); }
+.invite b { font: 900 1.3rem/1 var(--f-display); letter-spacing: 0.1em; display: block; margin-top: 4px; }
+.linkbtn { background: none; border: 0; padding: 4px 0; color: var(--ink); font: 600 0.88rem var(--f-body); text-decoration: underline; cursor: pointer; align-self: flex-start; }
 @media (max-height: 700px) { .sign { min-height: 66px; padding-block: 9px; } .status { min-height: 2.4em; } .app { gap: 8px; } }
 @media (prefers-reduced-motion: reduce) {
   .board.shake, .tile.sel, .tile.hint, .word .l.in, .stamp, .plate, .card, .status .thinking::after { animation: none !important; }
@@ -375,11 +379,13 @@ h1 { margin: 0; font-family: var(--f-display); font-weight: 900; font-size: 1.12
       <h2>Chi chiude perde</h2>
       <p class="small">Una lettera a testa sulla griglia. Chi è costretto a chiudere la parola perde.</p>
     </div>
+    <div class="invite" id="hInvite" hidden>Ti hanno invitato nella stanza <b id="hInvCode"></b></div>
     <div class="field">
       <label class="lab" for="myName">Il tuo nome</label>
       <input class="bigin" id="myName" type="text" maxlength="14" autocomplete="nickname" placeholder="Come ti chiamano?">
     </div>
-    <div class="field">
+    <button class="btn primary big" type="button" id="hInvJoin" hidden>Entra nella stanza</button>
+    <div class="field" id="hMulti">
       <div class="lab">Con più telefoni</div>
       <button class="btn primary big" type="button" id="hCreate">Crea una stanza</button>
       <div class="or">oppure entra con il codice</div>
@@ -392,6 +398,7 @@ h1 { margin: 0; font-family: var(--f-display); font-weight: 900; font-size: 1.12
     <div class="field">
       <div class="lab">Su questo telefono</div>
       <button class="btn big" type="button" id="hLocal">Contro il computer o passandovi il telefono</button>
+      <button class="mini linkbtn" type="button" id="hShowMulti">Crea un'altra stanza o entra con un codice</button>
     </div>
     <button class="mini" type="button" id="hRules" style="align-self:flex-start;background:none;border:0;padding:0;color:var(--ink);font:600 0.9rem var(--f-body);text-decoration:underline;cursor:pointer">Come si gioca</button>
   </div>
@@ -3771,6 +3778,7 @@ function adoptRemote(raw, quiet) {
 }
 
 function renderNet() {
+  if (typeof refreshMembers === 'function' && NET.room) refreshMembers();
   const el = $('net');
   if (!el) return;
   const on = !!(S && S.online);
@@ -3829,6 +3837,8 @@ function renderLobby() {
     <input class="linkbox" id="lLink" type="text" readonly value="${esc(link)}" aria-label="Link della stanza">
     <div class="lab">Nella stanza (${online.length})</div>
     <ul class="members">${list || '<li>Solo tu, per ora.</li>'}</ul>
+    ${online.length < 2 ? '<p class="small">Gli altri compaiono qui appena aprono il link. Se resti solo a lungo, controlla che il codice sia lo stesso.</p>' : ''}
+    ${typeof netDiag === 'function' && netDiag() ? `<p class="small">${netDiag()}</p>` : ''}
     ${inLobby ? `
     <div class="field"><div class="lab">Griglia</div><div class="seg">
       <label><input type="radio" name="lsize" id="ls4" value="4"${lob.size === 4 ? ' checked' : ''}><span>4 × 4<small>classica</small></span></label>
@@ -3896,15 +3906,26 @@ function openHome(err) {
   const h = $('home');
   if (!h) return;
   $('myName').value = myName();
-  $('hErr').textContent = err || '';
+  homeInfo(err || '', !!err);
   const code = parseHash().code;
   if (code && !$('hCode').value) $('hCode').value = code;
+  // opened from an invite link: one name, one button
+  const invited = !!code && !err;
+  $('hInvite').hidden = !invited; $('hInvJoin').hidden = !invited; $('hMulti').hidden = invited;
+  if (invited) { $('hInvCode').textContent = code; }
   h.hidden = false;
+  if (invited && !myName()) setTimeout(() => { try { $('myName').focus(); } catch (e) {} }, 50);
+}
+function homeInfo(text, isErr) {
+  const el = $('hErr');
+  if (!el) return;
+  el.textContent = text || '';
+  el.classList.toggle('info', !isErr);
 }
 function closeHome() { const h = $('home'); if (h) h.hidden = true; }
 function takeName() {
   const n = cleanStr(($('myName').value || '').replace(/\s+/g, ' '), 14);
-  if (!n) { $('hErr').textContent = 'Scrivi il tuo nome: lo vedranno gli altri.'; $('myName').focus(); return ''; }
+  if (!n) { homeInfo('Scrivi il tuo nome: lo vedranno gli altri.', true); $('myName').focus(); return ''; }
   store.set('ccp-name', n);
   return n;
 }
@@ -3914,16 +3935,21 @@ function parseHash() {
 }
 function initHome() {
   if (!$('home')) return;
-  $('hCreate').onclick = () => { if (!takeName()) return; $('hErr').textContent = ''; netJoin(makeCode(), { create: true }); };
+  $('hCreate').onclick = () => { if (!takeName()) return; netJoin(makeCode(), { create: true }); };
   const join = () => {
     if (!takeName()) return;
     const code = ($('hCode').value || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
-    if (!/^[A-Z0-9]{4,8}$/.test(code)) { $('hErr').textContent = 'Il codice ha 4 lettere, come quello sul telefono di chi ha creato la stanza.'; return; }
-    $('hErr').textContent = '';
+    if (!/^[A-Z0-9]{4,8}$/.test(code)) { homeInfo('Il codice ha 4 lettere, come quello sul telefono di chi ha creato la stanza.', true); return; }
     const h = parseHash();
     netJoin(code, { create: false, broker: h.code === code ? h.broker : null });
   };
   $('hJoin').onclick = join;
+  $('hInvJoin').onclick = () => {
+    if (!takeName()) return;
+    const h = parseHash();
+    if (h.code) netJoin(h.code, { create: false });
+  };
+  $('hShowMulti').onclick = () => { $('hInvite').hidden = true; $('hInvJoin').hidden = true; $('hMulti').hidden = false; try { history.replaceState(null, '', location.pathname); } catch (e) {} };
   $('hCode').addEventListener('keydown', e => { if (e.key === 'Enter') join(); });
   $('hLocal').onclick = () => { closeHome(); if (!store.get('ccp-seen', false)) openRules(); };
   $('hRules').onclick = openRules;
@@ -3970,135 +3996,172 @@ function startSite() {
   openHome('');
 }
 
-// ---------------------------------------------------------------- transport: public MQTT broker
-// Room NABA lives on two topics of a free public broker (no account):
-//   <prefix>/NABA/s        the game state, retained: whoever arrives gets the latest one
-//   <prefix>/NABA/m/<id>   one retained line per phone (name, online); the broker's last-will flips it
-//                          to offline when a phone drops without saying goodbye
-// The broker cannot refuse a stale write, so every state carries a version and its writer:
-// higher version wins, a tie goes to the smaller writer id, and the tie winner re-publishes.
-const BROKERS = (typeof window !== 'undefined' && window.CCP_BROKERS) || ['wss://broker.emqx.io:8084/mqtt', 'wss://broker.hivemq.com:8884/mqtt'];
+// ---------------------------------------------------------------- transport: public MQTT brokers
+// Every phone connects to two free public brokers at once and sends everything to both, so one of
+// them failing (or a network that blocks one) changes nothing. Room NABA uses three topics:
+//   <prefix>/NABA/s        the game state, with version and writer (also retained where supported)
+//   <prefix>/NABA/m/<id>   one presence line per phone, refreshed every 20 s
+//   <prefix>/NABA/q        "I just arrived": whoever holds the state answers with it
+// No broker can refuse a stale write, so: higher version wins, a tie goes to the smaller writer id,
+// and anyone who sees an older or losing state re-sends the winning one. Everybody converges.
+const BROKERS = ((typeof window !== 'undefined' && window.CCP_BROKERS) || [
+  { name: 'EMQX', url: 'wss://broker.emqx.io:8084/mqtt' },
+  { name: 'HiveMQ', url: 'wss://broker.hivemq.com:8884/mqtt' },
+]).map((b, i) => (typeof b === 'string' ? { name: 'Server ' + (i + 1), url: b } : b));
 const PREFIX = 'chichiudeperde-v1';
 const topic = (code, rest) => `${PREFIX}/${code}/${rest}`;
-let MQ = null;
+let MQS = [];
+let GEN = 0;
+let resendTimer = 0;
+const ONLINE_MS = 50000;
 
+function presenceLine(on) { return JSON.stringify({ n: myName(), j: NET.joinedAt, on, ts: Date.now() }); }
 function netJoin(code, opts = {}) {
   if (typeof mqtt === 'undefined') { openHome('Non riesco a caricare il collegamento: ricarica la pagina.'); return; }
   netLeave();
   if (S && S.online && S.room !== code) leaveToLocal(false);
-  Object.assign(NET, { room: code, wanted: true, v: 0, w: '', members: [], connected: false, decided: false, existing: null,
-    mode: opts.create ? 'create' : 'join', rejoin: !!opts.rejoin, joinedAt: joinedAtFor(code) });
-  NET.broker = Number.isInteger(opts.broker) && BROKERS[opts.broker] ? opts.broker : 0;
-  NET.hopped = Number.isInteger(opts.broker);   // a link that names a broker never hops to the other one
-  try { history.replaceState(null, '', '#' + code + (NET.broker ? '-' + NET.broker : '')); } catch (e) {}
-  const info = $('hErr');
-  if (info && $('home') && !$('home').hidden) info.textContent = opts.create ? 'Creo la stanza…' : `Entro nella stanza ${code}…`;
-  mqConnect();
+  const gen = ++GEN;
+  Object.assign(NET, { room: code, wanted: true, v: 0, w: '', members: [], memberMap: new Map(), connected: false, decided: false,
+    existing: 0, mode: opts.create ? 'create' : 'join', joinedAt: joinedAtFor(code), startedAt: Date.now(), firstUpAt: 0 });
+  try { history.replaceState(null, '', '#' + code); } catch (e) {}
+  homeInfo(opts.create ? 'Creo la stanza…' : `Entro nella stanza ${code}…`);
+  MQS = BROKERS.map(b => mqOpen(b, gen));
+  setTimeout(() => decideStart(gen), opts.create ? 1500 : 2500);
   render();
 }
-function mqConnect() {
-  const room = NET.room, meTopic = topic(room, 'm/' + NET.id);
-  const line = on => JSON.stringify({ n: myName(), j: NET.joinedAt, on });
-  const c = mqtt.connect(BROKERS[NET.broker], {
-    clientId: 'ccp_' + NET.id.slice(0, 10) + '_' + Math.random().toString(36).slice(2, 7),
-    clean: true, keepalive: 20, reconnectPeriod: 1500, connectTimeout: 7000, resubscribe: false,
-    will: { topic: meTopic, payload: line(0), qos: 1, retain: true },
-  });
-  MQ = c;
-  const hop = setTimeout(() => {           // this broker does not answer: try the other one
-    if (MQ !== c || NET.connected || NET.hopped) return;
-    NET.hopped = true; NET.broker = (NET.broker + 1) % BROKERS.length;
-    try { c.end(true); } catch (e) {}
-    try { history.replaceState(null, '', '#' + room + (NET.broker ? '-' + NET.broker : '')); } catch (e) {}
-    mqConnect();
-  }, 7000);
+function mqOpen(b, gen) {
+  const room = NET.room, meT = topic(room, 'm/' + NET.id);
+  const entry = { name: b.name, up: false, c: null };
+  let c;
+  try {
+    c = mqtt.connect(b.url, {
+      clientId: 'ccp_' + NET.id.slice(0, 10) + '_' + Math.random().toString(36).slice(2, 7),
+      clean: true, keepalive: 20, reconnectPeriod: 2500, connectTimeout: 9000, resubscribe: false,
+      will: { topic: meT, payload: JSON.stringify({ n: myName(), j: NET.joinedAt, on: 0, ts: 0 }), qos: 0, retain: true },
+    });
+  } catch (e) { return entry; }
+  entry.c = c;
   c.on('connect', () => {
-    if (MQ !== c) return;
-    clearTimeout(hop);
-    NET.connected = true;
-    c.subscribe([topic(room, 's'), topic(room, 'm/+')], { qos: 1 }, err => {
-      if (err || MQ !== c) return;
-      c.publish(meTopic, line(1), { qos: 1, retain: true });
-      if (!NET.decided) setTimeout(() => decideStart(c), NET.mode === 'create' ? 900 : 2200);
+    if (gen !== GEN) return;
+    entry.up = true; NET.connected = true;
+    if (!NET.firstUpAt) NET.firstUpAt = Date.now();
+    c.subscribe([topic(room, 's'), topic(room, 'm/+'), topic(room, 'q')], { qos: 1 }, err => {
+      if (err || gen !== GEN) return;
+      c.publish(meT, presenceLine(1), { qos: 0, retain: true });
+      c.publish(topic(room, 'q'), JSON.stringify({ id: NET.id }), { qos: 0 });
+      if (NET.decided && S && S.online) c.publish(topic(room, 's'), stateMsg(), { qos: 1, retain: true });
     });
     render();
   });
-  c.on('message', (tp, buf) => onMq(c, tp, buf));
-  const down = () => { if (MQ !== c) return; if (NET.connected) { NET.connected = false; render(); } };
+  c.on('message', (tp, buf) => onMq(gen, tp, buf));
+  const down = () => { if (gen !== GEN || !entry.up) return; entry.up = false; NET.connected = MQS.some(m => m.up); render(); };
   c.on('close', down);
   c.on('offline', down);
   c.on('error', () => {});
+  return entry;
 }
-function decideStart(c) {
-  if (MQ !== c || NET.decided) return;
-  if (NET.mode === 'create') {
-    if (NET.existing && Date.now() - NET.existing < 12 * 3600e3) { netJoin(makeCode(), { create: true, broker: NET.broker }); return; }
-    NET.decided = true;
-    S = lobbyState(NET.room); NET.v = 0; NET.w = '';
-    publish();
-    store.set('ccp-room', { code: NET.room, at: Date.now(), b: NET.broker, j: NET.joinedAt });
-    closeHome(); render();
+function decideStart(gen) {
+  if (gen !== GEN || NET.decided) return;
+  if (!MQS.some(m => m.up)) {                 // nobody reachable yet: keep waiting, say so after a while
+    if (Date.now() - NET.startedAt > 12000) homeInfo('Non riesco a raggiungere i server delle partite. Controlla la connessione: riprovo da solo.', true);
+    setTimeout(() => decideStart(gen), 1000);
     return;
   }
-  if (!NET.hopped) {                         // not on this broker: the room may live on the other one
-    NET.hopped = true;
-    netLeave();
-    NET.broker = (NET.broker + 1) % BROKERS.length;
-    mqConnect();
-    return;
-  }
-  const rejoin = NET.rejoin;
-  netLeave();
-  NET.wanted = false; NET.connected = false; NET.room = '';
-  store.set('ccp-room', null);
-  try { history.replaceState(null, '', location.pathname); } catch (e) {}
-  leaveToLocal(false);
-  openHome(rejoin ? 'La stanza di prima non c’è più: creane una nuova.' : 'Stanza non trovata: controlla il codice.');
+  const waited = Date.now() - NET.firstUpAt;   // give the room a moment to answer after we got through
+  if (waited < 1500) { setTimeout(() => decideStart(gen), 1500 - waited); return; }
+  if (NET.mode === 'create' && NET.existing && Date.now() - NET.existing < 12 * 3600e3) { netJoin(makeCode(), { create: true }); return; }
+  // nobody answered with a game: the room starts here, and whoever arrives later finds it
+  NET.decided = true;
+  S = lobbyState(NET.room); NET.v = 0; NET.w = '';
+  publish();
+  store.set('ccp-room', { code: NET.room, at: Date.now(), j: NET.joinedAt });
+  closeHome(); render();
 }
-function onMq(c, tp, buf) {
-  if (MQ !== c) return;
+function onMq(gen, tp, buf) {
+  if (gen !== GEN) return;
   const base = PREFIX + '/' + NET.room + '/';
   if (!tp.startsWith(base)) return;
   const rest = tp.slice(base.length), txt = buf.toString();
   let m = null;
   if (txt) { if (txt.length > 200000) return; try { m = JSON.parse(txt); } catch (e) { return; } }
+  if (rest === 'q') { if (NET.decided && m && m.id !== NET.id) resendSoon(); return; }
   if (rest.startsWith('m/')) {
     const id = rest.slice(2);
     if (!/^[A-Za-z0-9_-]{4,40}$/.test(id)) return;
-    const list = NET.members.filter(x => x.id !== id);
-    if (m && typeof m === 'object') list.push({ id, name: cleanStr(m.n, 14) || 'Giocatore', online: m.on === 1, j: Number(m.j) || 0 });
-    NET.members = list.sort((a, b) => a.j - b.j || (a.id < b.id ? -1 : 1)).slice(-24);
+    const prev = NET.memberMap.get(id);
+    if (!m || typeof m !== 'object') { if (id !== NET.id) NET.memberMap.delete(id); }
+    else {
+      const ts = Number(m.ts) || 0;
+      if (!prev || ts >= prev.ts) NET.memberMap.set(id, { id, name: cleanStr(m.n, 14) || 'Giocatore', j: Number(m.j) || 0, on: m.on === 1, ts });
+    }
+    refreshMembers();
     render();
     return;
   }
   if (rest !== 's' || !m || typeof m !== 'object' || !Number.isInteger(m.v)) return;
   const v = m.v, w = String(m.w || '');
-  if (NET.mode === 'create' && !NET.decided) { NET.existing = Number(m.t) || 0; return; }
-  if (v > NET.v || (v === NET.v && w !== NET.w && w < NET.w)) {
+  if (NET.mode === 'create' && !NET.decided) { NET.existing = Math.max(NET.existing, Number(m.t) || 0); return; }
+  const better = v > NET.v || (v === NET.v && w !== NET.w && w < NET.w);
+  if (better) {
     const lostTie = v === NET.v && NET.w === NET.id;
     const first = !NET.decided;
     if (adoptRemote(m.s, first)) {
-      NET.v = v; NET.w = w;
+      NET.v = v; NET.w = w; NET.lastMsg = txt;
       if (first) { NET.decided = true; closeHome(); }
       if (lostTie) flash('Qualcuno ha giocato un attimo prima di te.');
     }
-  } else if (v === NET.v && w > NET.w && NET.w === NET.id) {
-    publish();                               // same version written twice and mine wins: make the room keep mine
+  } else if (NET.decided && (v < NET.v || (v === NET.v && w !== NET.w))) {
+    resendSoon();                            // someone is behind, or lost a tie: send them the winning state
   }
 }
+function refreshMembers() {
+  const now = Date.now();
+  NET.members = [...NET.memberMap.values()]
+    .map(x => ({ id: x.id, name: x.name, j: x.j, online: x.id === NET.id ? NET.connected : x.on && now - x.ts < ONLINE_MS }))
+    .filter(x => x.online || (S && S.settings && S.settings.players.some(p => p.id === x.id)))
+    .sort((a, b) => a.j - b.j || (a.id < b.id ? -1 : 1)).slice(0, 24);
+  if (NET.room && !NET.members.some(x => x.id === NET.id)) {
+    NET.members.push({ id: NET.id, name: myName() || 'Tu', j: NET.joinedAt, online: NET.connected });
+    NET.members.sort((a, b) => a.j - b.j || (a.id < b.id ? -1 : 1));
+  }
+}
+function stateMsg() { return JSON.stringify({ v: NET.v, w: NET.w, t: Date.now(), s: S }); }
+function sendState() {
+  const msg = stateMsg();
+  NET.lastMsg = msg;
+  for (const x of MQS) if (x.up) x.c.publish(topic(NET.room, 's'), msg, { qos: 1, retain: true });
+}
+function resendSoon() {
+  if (resendTimer) return;
+  resendTimer = setTimeout(() => { resendTimer = 0; if (NET.decided && S && S.online) sendState(); }, 250 + Math.random() * 500);
+}
 function publish() {
-  if (!MQ || !NET.room || !S || !S.online) return;
+  if (!NET.room || !S || !S.online) return;
   NET.v += 1; NET.w = NET.id; S.rev = NET.v;
-  MQ.publish(topic(NET.room, 's'), JSON.stringify({ v: NET.v, w: NET.w, t: Date.now(), s: S }), { qos: 1, retain: true });
+  sendState();
 }
 function netLeave() {
-  const c = MQ;
-  MQ = null;
-  if (!c) return;
-  try { if (NET.room) c.publish(topic(NET.room, 'm/' + NET.id), '', { qos: 1, retain: true }); } catch (e) {}
-  setTimeout(() => { try { c.end(true); } catch (e) {} }, 400);
+  const old = MQS, room = NET.room;
+  MQS = []; GEN++;
+  clearTimeout(resendTimer); resendTimer = 0;
+  for (const x of old) {
+    if (!x.c) continue;
+    try { if (x.up && room) x.c.publish(topic(room, 'm/' + NET.id), '', { qos: 0, retain: true }); } catch (e) {}
+    setTimeout(() => { try { x.c.end(true); } catch (e) {} }, 400);
+  }
 }
-function netWake() { if (MQ && !MQ.connected) { try { MQ.reconnect(); } catch (e) {} } }
+function netWake() { for (const x of MQS) if (x.c && !x.up) { try { x.c.reconnect(); } catch (e) {} } }
+function netDiag() {
+  if (!MQS.length) return '';
+  return 'Server: ' + MQS.map(x => `${x.name} ${x.up ? '✓' : '✗'}`).join(' · ');
+}
+// keep presence fresh and online flags honest
+setInterval(() => {
+  if (!NET.room || !MQS.length) return;
+  for (const x of MQS) if (x.up) x.c.publish(topic(NET.room, 'm/' + NET.id), presenceLine(1), { qos: 0, retain: true });
+  refreshMembers();
+  if (S && S.online) render();
+}, 20000);
 
 try { window.claude?.hot?.snapshot?.(() => ({ state: S && S.online ? null : JSON.parse(JSON.stringify(S)) })); } catch (e) {}
 window.claude?.hot?.ready ? window.claude.hot.ready(start) : start(window.claude?.hot?.data ?? {});

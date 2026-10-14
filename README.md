@@ -21,9 +21,11 @@ niente account, niente app. Si può anche giocare da soli contro il computer o p
 
 - `index.html` — tutto il gioco in un file: griglia, dizionario italiano (~50.000 parole con plurali,
   femminili, diminutivi, accrescitivi e vezzeggiativi), computer a tre livelli, analisi della mossa decisiva.
-- Le mosse tra telefoni passano da un broker MQTT pubblico e gratuito (`broker.emqx.io`, di riserva
-  `broker.hivemq.com`): ogni stanza ha uno stato con versione, conservato dal broker, così chi arriva
-  o rientra ritrova la partita. Tutto ciò che arriva dagli altri telefoni viene controllato prima di essere mostrato.
+- Le mosse tra telefoni passano da due broker MQTT pubblici e gratuiti insieme (`broker.emqx.io` e
+  `broker.hivemq.com`): basta che uno dei due risponda. Ogni stanza ha uno stato con versione; chi arriva
+  lo chiede ai telefoni presenti, e chiunque veda uno stato più vecchio rimanda quello giusto, così
+  tutti convergono anche se un broker non conserva i messaggi. Tutto ciò che arriva dagli altri
+  telefoni viene controllato prima di essere mostrato.
 - `vps/` — la stessa cosa con un server proprio (Node + WebSocket in Docker, dietro nginx), per
   quando si vuole farla girare su un server di casa invece che sul broker pubblico.
 
