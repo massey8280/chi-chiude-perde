@@ -1,0 +1,9 @@
+{
+  "name": "chi-chiude-perde-relay",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Stanze in tempo reale per Chi chiude perde",
+  "main": "server.js",
+  "scripts": { "start": "node server.js" },
+  "dependencies": { "ws": "8.18.0" }
+}

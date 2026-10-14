@@ -1,0 +1,16 @@
+{
+  "name": "Chi chiude perde",
+  "short_name": "Chi chiude",
+  "description": "Il gioco di parole della macchina su una griglia. Si gioca anche con più telefoni.",
+  "lang": "it",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#e3e8e4",
+  "theme_color": "#0b7140",
+  "icons": [
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" }
+  ]
+}

@@ -1,0 +1,19 @@
+# Chi chiude perde: un solo container (server della stanza + sito).
+# Si aggancia alla rete del container sensori-nginx, che gli manda il traffico del sottodominio.
+services:
+  parole:
+    build: ./relay
+    container_name: parole-relay
+    restart: unless-stopped
+    volumes:
+      - ./www:/app/www:ro
+    networks:
+      - sensori
+    mem_limit: 256m
+    logging:
+      driver: json-file
+      options: { max-size: "5m", max-file: "2" }
+networks:
+  sensori:
+    external: true
+    name: sensori-iot_default
